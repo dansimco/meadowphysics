@@ -64,6 +64,19 @@ setup_params = function(mp)
     options = {"no", "yes"}
   }
 
+
+  params:add {
+    type = "option",
+    id = "monobright",
+    name = "use monobright grid",
+    options = {"auto", "no", "yes"},
+    default = 1,
+    action = function(value)
+      -- auto detects 40h / pre-2011 series grids by serial; no/yes override
+      mp.grid:set_monobright(value)
+    end
+  }
+
 end
 
 return setup_params

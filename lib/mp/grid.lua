@@ -5,6 +5,92 @@ local grid = {}
 local glyphs = {}
 local voice_count = 8
 
+-- monobright grids (40h, series) only light leds with level > 7, so the
+-- 1..4 levels used here never show. when enabled, levels >= 3 (playhead,
+-- selection, status, glyphs) become full and dim hints/ranges become off.
+local monobright = false
+local MONO_ON_THRESHOLD = 3
+
+-- Serial prefixes of grids without variable brightness. Monome serials are
+-- model-prefixed: the 40h series and the pre-2011 m64/m128/m256 walnut and
+-- greyscale editions are all monobright. Varibright grids (2011+) report
+-- m1000xxx / m360xxx style serials, so anything unmatched is assumed
+-- varibright and can be corrected with the "use monobright grid" param.
+-- The m64/m128/m256 patterns require the hyphen the pre-2011 editions use;
+-- wrongly flattening a varibright grid is worse than missing a monobright
+-- one, which is one param away from being fixed.
+local MONOBRIGHT_SERIAL_PATTERNS = {
+  "^m40h",     -- 40h series
+  "^m64%-%d",  -- 64 (walnut / greyscale)
+  "^m128%-%d", -- 128 (walnut / greyscale)
+  "^m256%-%d", -- 256 (walnut / greyscale)
+  "^m0000",    -- early 40h-era serials
+}
+
+-- Does this grid's serial/name match a known monobright model?
+-- Accepts a vport or a raw device; serial lives on the underlying .device,
+-- the vport only carries a name of the form "<friendly name> <serial>".
+function grid.detect_monobright(device)
+  if not device then return false end
+  local dev = device.device or device
+  local serial = tostring(dev.serial or device.serial or ""):lower()
+  local name = tostring(dev.name or device.name or ""):lower()
+  for _, pattern in ipairs(MONOBRIGHT_SERIAL_PATTERNS) do
+    if serial:match(pattern) or name:match(pattern) then return true end
+    -- the name carries the serial appended, so also look for the model
+    -- anywhere in it, not only at the start
+    if name:match("%f[%w]" .. pattern:gsub("^%^", "")) then return true end
+  end
+  return false
+end
+
+-- Serial and name as the detector sees them, for troubleshooting from the
+-- maiden repl: print(include("meadowphysics/lib/mp/grid").identify())
+function grid.identify()
+  local dev = g.device or g
+  return string.format("serial=%q name=%q %dx%d -> %s",
+    tostring(dev.serial or ""), tostring(dev.name or g.name or ""),
+    tonumber(g.cols) or 0, tonumber(g.rows) or 0,
+    grid.detect_monobright(g) and "monobright" or "varibright")
+end
+
+-- Apply the "use monobright grid" param: 1 = auto (detect), 2 = no, 3 = yes
+function grid:set_monobright(setting)
+  if setting == 2 then
+    monobright = false
+  elseif setting == 3 then
+    monobright = true
+  else
+    monobright = grid.detect_monobright(g)
+  end
+end
+
+function grid:is_monobright()
+  return monobright
+end
+
+-- Grids attach asynchronously, so when the param is first applied g.device
+-- is usually still nil and auto resolves to varibright. Re-run detection
+-- whenever the attached device changes identity. Called from draw(), which
+-- runs every clock tick, so this self-corrects right after the grid appears.
+function grid:poll_monobright()
+  local dev = g.device
+  local id = dev and (dev.serial or dev.name) or nil
+  if id ~= self._detected_device_id then
+    self._detected_device_id = id
+    local setting = (params and params.lookup and params.lookup["monobright"])
+      and params:get("monobright") or 1
+    self:set_monobright(setting)
+  end
+end
+
+local function led(x, y, l)
+  if monobright then
+    l = (l >= MONO_ON_THRESHOLD) and 15 or 0
+  end
+  g:led(x, y, l)
+end
+
 -- local rule_icons = {
 --   {0,0,0,0,0,0,0,0},-- o
 --   {0,24,24,126,126,24,24,0}, -- +
@@ -18,16 +104,17 @@ local voice_count = 8
 
 local function base_lighting(mp)
   for i = 1, #mp.voices do
-    g:led(1, i,  1)
-    g:led(3, i,  1)
-    g:led(4, i,  1)
-    g:led(6, i,  1)
-    g:led(7, i,  1)
+    led(1, i,  1)
+    led(3, i,  1)
+    led(4, i,  1)
+    led(6, i,  1)
+    led(7, i,  1)
   end
 end
 
 
 function grid:draw(mp)
+  self:poll_monobright()
   g:all(0)
 
   if(mp.focus == "RESETS") then
@@ -36,28 +123,28 @@ function grid:draw(mp)
     for i = 1, #mp.voices do
       voice = mp.voices[i]
       if (params:get(i.."_type") == 1) then
-        g:led(6, i,  4)
+        led(6, i,  4)
       else
-        g:led(7, i,  4)
+        led(7, i,  4)
       end
       if (voice.is_playing) then
-        g:led(3, i,  4)
+        led(3, i,  4)
       end
-      g:led(8 + params:get(i.."_clock_division_high"), i,  4)
+      led(8 + params:get(i.."_clock_division_high"), i,  4)
       for div_i = params:get(i.."_clock_division_low"), params:get(i.."_clock_division_high") do
-        g:led(div_i+8, i,  2)
+        led(div_i+8, i,  2)
       end
-      g:led(8 + voice.current_clock_division, i,  4)
+      led(8 + voice.current_clock_division, i,  4)
     end
     -- Light up the focused voice
-    g:led(1, mp.state.selected_voice,  4)
+    led(1, mp.state.selected_voice,  4)
     -- Show all the voices targeted by this voice
     for ti = 1, voice_count do
       if (params:get(mp.state.selected_voice .. "_reset_" .. ti) == 2) then
-        g:led(4, ti,  4)
+        led(4, ti,  4)
       end
       if params:get(ti .. "_running") == 2 then
-        g:led(3, ti,  4)
+        led(3, ti,  4)
       end
     end
   end
@@ -68,11 +155,11 @@ function grid:draw(mp)
 	    local voice = mp.voices[i]
       -- show cycle range
       for ci = voice.get("range_low"), voice.get("range_high") do 
-        g:led(ci, i,  2)
+        led(ci, i,  2)
       end
       -- show playhead
       if voice.isRunning() then
-  	    g:led(voice.current_step, i,  4)
+  	    led(voice.current_step, i,  4)
       end
 	  end
 	end
@@ -81,7 +168,7 @@ function grid:draw(mp)
     base_lighting(mp)
 
     -- Light up the focused voice
-    g:led(1, mp.state.selected_voice,  4)
+    led(1, mp.state.selected_voice,  4)
     local rule = params:get(mp.state.selected_voice .. "_rule")
 
     -- Draw the rule glyph
@@ -89,18 +176,18 @@ function grid:draw(mp)
     for yi = 1, 8 do
       for xi = 1, 10 do
         if(glyph[yi][xi] == 1) then
-          g:led(xi+8, yi,  3)
+          led(xi+8, yi,  3)
         end
       end
     end
 
     -- Draw rule target/application indicator
-    g:led(5,params:get(mp.state.selected_voice .. "_rule_target"),3)
-    g:led(6,params:get(mp.state.selected_voice .. "_rule_target"),3)
-    g:led(7,params:get(mp.state.selected_voice .. "_rule_target"),3)
+    led(5,params:get(mp.state.selected_voice .. "_rule_target"),3)
+    led(6,params:get(mp.state.selected_voice .. "_rule_target"),3)
+    led(7,params:get(mp.state.selected_voice .. "_rule_target"),3)
     -- show rule target mode
     local rule_application = params:get(mp.state.selected_voice .. "_rule_application")
-    g:led(4 + rule_application,params:get(mp.state.selected_voice .. "_rule_target"), 8)
+    led(4 + rule_application,params:get(mp.state.selected_voice .. "_rule_target"), 8)
 
 end
   g:refresh()

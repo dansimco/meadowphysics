@@ -8,6 +8,7 @@ local function Meadowphysics ()
   local setup_params = include("lib/mp/parameters")
   local ui = include("lib/mp/ui")
   local mp_grid = include("lib/mp/grid")
+  mp.grid = mp_grid
   local scale = include("lib/mp/scale")
   local MusicUtil = require "musicutil"
 
