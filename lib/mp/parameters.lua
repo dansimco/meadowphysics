@@ -27,15 +27,29 @@ setup_params = function(mp)
     end
   }
 
+  -- norns has 16 midi ports; mods such as nbout append a virtual one
+  -- (midi.vports grows to 17), so size the range from the live table.
+  local midi_port_count = math.max(16, #midi.vports)
+
   params:add{
   	type = "number",
   	id = "midi_out_device",
   	name = "midi out device",
     min = 1,
-    max = 4,
+    max = midi_port_count,
     default = 1,
+    formatter = function(param)
+      local v = param:get()
+      local port = midi.vports[v]
+      local name = port and port.name
+      if name and name ~= "none" then
+        return v .. ": " .. name
+      end
+      return tostring(v)
+    end,
     action = function(value)
-			mp.midi_out_device = midi.connect(value)
+      local device = midi.connect(value)
+      if device then mp.midi_out_device = device end
 		end
 	}
 

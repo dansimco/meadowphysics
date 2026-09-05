@@ -31,8 +31,11 @@ local function Meadowphysics ()
     mp.state.grid_keys[i] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
   end
 
-  mp.midi_out_device = midi.connect(1)
-  
+  -- midi out is connected in mp.init, not here: this file runs before the
+  -- script_pre_init hook, so mods that replace the `midi` table (nbout adds
+  -- an "nb" port) are not yet active at file scope.
+  mp.midi_out_device = nil
+
   local mp_ui = ui.new(mp)
 
   local voices = {}
@@ -42,6 +45,9 @@ local function Meadowphysics ()
     mp.voice_count = 8
     setup_params(mp)
     scale:make_params()
+
+    -- connect midi out now that mods have had their chance to patch `midi`
+    mp.midi_out_device = midi.connect(params:get("midi_out_device"))
 
 
     -- set up each voice
